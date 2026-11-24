@@ -12,8 +12,6 @@ on:
 env:
   EM_VERSION: 4.0.20
   GODOT_TAG: 4.7-stable
-  # emcc reads this on every compile and link, so the SCons build needs no new option.
-  EMCC_CFLAGS: --profiling-funcs
 
 jobs:
   template:
@@ -35,8 +33,33 @@ jobs:
 
       - name: Build template (as the official build, plus names)
         run: |
-          scons platform=web target=template_release threads=no dlink_enabled=yes production=yes --jobs=$(nproc)
+          # Without debug_symbols the SConstruct links with -s, which strips the names that
+          # --profiling-funcs keeps. debug_symbols=yes would add -g3 DWARF and change the
+          # optimized output, so drop only the strip.
+          grep -q 'env.AppendUnique(LINKFLAGS=\["-s"\])' SConstruct
+          sed -i 's/env.AppendUnique(LINKFLAGS=\["-s"\])/pass/' SConstruct
+          scons platform=web target=template_release threads=no dlink_enabled=yes production=yes linkflags=--profiling-funcs --jobs=$(nproc)
           ls -la bin
+          # Fail here, not in the browser, if the names did not survive.
+          unzip -o -q bin/godot.web.template_release.wasm32.nothreads.dlink.zip godot.side.wasm -d /tmp/tpl
+          python3 - <<'PY'
+          b = open('/tmp/tpl/godot.side.wasm', 'rb').read()
+          p, size = 8, 0
+          def leb():
+              global p
+              r = s = 0
+              while True:
+                  x = b[p]; p += 1; r |= (x & 127) << s; s += 7
+                  if not x & 128: return r
+          while p < len(b):
+              sid = b[p]; p += 1; n = leb(); end = p + n
+              if sid == 0:
+                  l = leb()
+                  if b[p:p + l] == b'name': size = n
+              p = end
+          print('name section bytes:', size)
+          assert size > 100000, 'no function names in godot.side.wasm'
+          PY
 
       - name: Upload template
         uses: actions/upload-artifact@v4
