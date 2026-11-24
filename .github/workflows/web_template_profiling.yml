@@ -1,0 +1,45 @@
+name: Web template with function names (profiling only)
+
+# The one template the MeoDuKy web map editor ships (official 4.7-stable, dlink, no threads,
+# release), linked with --profiling-funcs so browser flame charts show C++ function names
+# instead of wasm-function[N]. This branch keeps no other workflow. Never ship the result.
+
+on:
+  push:
+    branches: [web-template-profiling]
+  workflow_dispatch:
+
+env:
+  EM_VERSION: 4.0.20
+  GODOT_TAG: 4.7-stable
+  # emcc reads this on every compile and link, so the SCons build needs no new option.
+  EMCC_CFLAGS: --profiling-funcs
+
+jobs:
+  template:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Godot ${{ env.GODOT_TAG }}
+        uses: actions/checkout@v4
+        with:
+          repository: godotengine/godot
+          ref: ${{ env.GODOT_TAG }}
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ env.EM_VERSION }}
+
+      - name: Set up Python and SCons
+        run: python -m pip install scons==4.7.0
+
+      - name: Build template (as the official build, plus names)
+        run: |
+          scons platform=web target=template_release threads=no dlink_enabled=yes production=yes --jobs=$(nproc)
+          ls -la bin
+
+      - name: Upload template
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dlink-nothreads-release-profiling-${{ env.GODOT_TAG }}
+          path: bin/godot.web.template_release.wasm32.nothreads.dlink.zip
